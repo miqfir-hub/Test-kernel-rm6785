@@ -9,18 +9,18 @@ on:
         default: 'backup-miku'
         type: string
       ksu_variant:
-        description: 'Root: KernelSU-Next or Stock (no root)'
+        description: 'Root: BakaSU (with SUSFS) or Stock (no root)'
         required: true
-        default: 'KernelSU-Next'
+        default: 'BakaSU'
         type: choice
         options:
-          - 'KernelSU-Next'
+          - 'BakaSU'
           - 'Stock'
-      enable_susfs:
-        description: 'Enable SUSFS (off = more stable)'
+      ksu_ref:
+        description: 'BakaSU commit/tag/branch (pinned = reproducible)'
         required: true
-        default: false
-        type: boolean
+        default: '7b65bde0710b5e7c6f755545cb15a4abd417f3a8'
+        type: string
       stable_mode:
         description: 'Stable mode (no panic on oops, SUSFS risky options off)'
         required: true
@@ -46,7 +46,7 @@ jobs:
       CCACHE_DIR: /home/runner/.ccache
       IN_BRANCH: ${{ github.event.inputs.kernel_branch }}
       IN_VARIANT: ${{ github.event.inputs.ksu_variant }}
-      IN_SUSFS: ${{ github.event.inputs.enable_susfs }}
+      IN_KSU_REF: ${{ github.event.inputs.ksu_ref }}
       IN_STABLE: ${{ github.event.inputs.stable_mode }}
 
     steps:
@@ -88,21 +88,20 @@ jobs:
           cd kernel
           echo "KERNEL_COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
-      - name: Add KernelSU-Next
-        if: github.event.inputs.ksu_variant == 'KernelSU-Next'
+      - name: Add BakaSU (KernelSU + SUSFS)
+        if: github.event.inputs.ksu_variant == 'BakaSU'
         working-directory: kernel
         run: |
-          if [ "$IN_SUSFS" = "true" ]; then
-            curl -LSs "https://gist.github.com/EvilAnsh/a57e99f5d8a8e7d22a59874d99752893/raw/443ecfa83c06821a26c58ca943cec9eda9c95264/ksun.sh" | bash -s legacy
-          else
-            curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
-          fi
-          ls -d KernelSU* drivers/kernelsu 2>/dev/null || true
+          # The hooks already in this kernel source are BakaSU-style (SUSFS inline hook),
+          # so BakaSU is the driver that matches it. KernelSU-Next does not link.
+          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/${IN_KSU_REF}/kernel/setup.sh" | bash -s "${IN_KSU_REF}"
+          ls -d KernelSU drivers/kernelsu
+          echo "KSU_COMMIT=$(git -C KernelSU rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - name: Build kernel
         working-directory: kernel
         run: |
-          set -e
+          set -eo pipefail
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export KBUILD_BUILD_USER="builder"
           export KBUILD_BUILD_HOST="github-actions"
@@ -118,9 +117,6 @@ jobs:
               -d KSU_SUSFS_SUS_MAP \
               -d KSU_SUSFS_SUS_MEMFD \
               -d KSU_SUSFS_ENABLE_LOG
-            if [ "$IN_SUSFS" != "true" ]; then
-              ./scripts/config --file out/.config -d KSU_SUSFS
-            fi
             make O=out ARCH=arm64 olddefconfig
           fi
 
@@ -140,8 +136,8 @@ jobs:
       - name: Check build output
         working-directory: kernel
         run: |
+          ls -la out/arch/arm64/boot/ || true
           test -f out/arch/arm64/boot/Image.gz || { echo "Image.gz not found"; exit 1; }
-          ls -la out/arch/arm64/boot/
           grep -m1 "UTS_VERSION\|UTS_RELEASE" out/include/generated/compile.h out/include/generated/utsrelease.h || true
 
       - name: Package with AnyKernel3
@@ -202,7 +198,7 @@ jobs:
 
           TS=$(TZ=Asia/Jakarta date +"%Y%m%d-%H%M")
           NAME="Miku-RM6785-${IN_VARIANT}"
-          if [ "$IN_VARIANT" = "KernelSU-Next" ] && [ "$IN_SUSFS" = "true" ]; then
+          if [ "$IN_VARIANT" = "BakaSU" ]; then
             NAME="${NAME}-SUSFS"
           fi
           if [ "$IN_STABLE" = "true" ]; then
@@ -229,6 +225,6 @@ jobs:
             echo "## Build selesai"
             echo "- Zip: \`${ZIP_NAME}.zip\`"
             echo "- Branch: \`${IN_BRANCH}\` (commit \`${KERNEL_COMMIT}\`)"
-            echo "- Root: ${IN_VARIANT}, SUSFS: ${IN_SUSFS}, Stable mode: ${IN_STABLE}"
+            echo "- Root: ${IN_VARIANT} (${KSU_COMMIT:-none}), Stable mode: ${IN_STABLE}"
             echo "- Unduh di bagian **Artifacts** paling bawah halaman ini."
           } >> "$GITHUB_STEP_SUMMARY"
