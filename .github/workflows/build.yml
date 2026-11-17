@@ -98,6 +98,15 @@ jobs:
           ls -d KernelSU drivers/kernelsu
           echo "KSU_COMMIT=$(git -C KernelSU rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
+          # BakaSU needs two SELinux functions to be non-static (CONFIG_KALLSYMS_ALL is off
+          # and cannot be enabled because DEBUG_KERNEL is off in this defconfig).
+          F=security/selinux/ss/services.c
+          sed -i 's/^static void security_dump_masked_av/void security_dump_masked_av/; s/^static void context_struct_compute_av/void context_struct_compute_av/' "$F"
+          grep -n "security_dump_masked_av\|context_struct_compute_av" "$F" | head
+          if grep -q -F "static void security_dump_masked_av" "$F" || grep -q -F "static void context_struct_compute_av" "$F"; then
+            echo "SELinux export patch failed"; exit 1
+          fi
+
       - name: Build kernel
         working-directory: kernel
         run: |
