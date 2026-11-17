@@ -17,9 +17,9 @@ on:
           - 'BakaSU'
           - 'Stock'
       ksu_ref:
-        description: 'BakaSU commit/tag/branch (pinned = reproducible)'
+        description: 'BakaSU commit/tag (default = v4.2.0-rc1)'
         required: true
-        default: '7b65bde0710b5e7c6f755545cb15a4abd417f3a8'
+        default: 'a9216b04e29cc973ddbf845342f2cbf85b47b460'
         type: string
       stable_mode:
         description: 'Stable mode (no panic on oops, SUSFS risky options off)'
